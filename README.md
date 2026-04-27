@@ -21,7 +21,7 @@
 - Win + - 使窗口向预期一侧缩小水平方向
 - Win + Shift + + 使窗口增加垂直方向
 - Win + Shift + - 使窗口缩小垂直方向
-- alt + Space 切换输入法
+- Alt + Space 切换输入法
 - 禁止 CapsLock 键切换大小写
 - CapsLock 映射为右 Shift（第三方中文输入法设置为 右Shift 切换中英文）
 - Win + F11 重载脚本
