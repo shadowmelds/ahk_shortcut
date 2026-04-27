@@ -32,9 +32,9 @@
 1. 安装 [AutoHotKey v2.0](https://www.autohotkey.com/)
 2. `shortcut.ahk` 以管理员方式运行
 
-⚠️ 注意：Win + 滚轮 以及 [ ] 功能需要 [VirtualDesktopAccessor.dll](https://github.com/ciantic/virtualdesktopAccessor) 下载后放到 `shortcut.ahk` 同级目录即可
+⚠️ 注意：Win + 滚轮 以及 [ ] 功能需要 [VirtualDesktopAccessor.dll](https://github.com/ciantic/virtualdesktopAccessor) ，下载 dll 后放到 `shortcut.ahk` 同级目录即可
 
 设置开机自启：
 
-1. 修改 `create_task_scheduler.ps1` 中的 `$Arguments` 修改为 `shortcut.ahk` 的路径
+1. `create_task_scheduler.ps1` 中的 `$Arguments` 替换为 `shortcut.ahk` 的绝对路径
 2. 以管理员方式运行 `create_task_scheduler.ps1`，这个脚本会创建开机自启的计划任务
