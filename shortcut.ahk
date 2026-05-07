@@ -538,21 +538,18 @@ ShellMessage(wParam, lParam, *) {
 
 AdjustWindow(hwnd) {
     try {
-        ; 排除没有标题栏的窗口
         style := WinGetStyle(hwnd)
         if !(style & 0x00C00000)
             return
 
-        ; --- 新增：检查并处理最大化状态 ---
-        ; WinGetMinMax 返回 1 表示最大化，-1 表示最小化，0 表示普通状态
-        if (WinGetMinMax(hwnd) = 1) {
-            WinRestore(hwnd) 
+        ; 1. 处理最大化：如果是最大化，必然需要调整，所以这里直接还原
+        isMaximized := (WinGetMinMax(hwnd) = 1)
+        if isMaximized {
+            WinRestore(hwnd)
         }
 
-        ; 获取当前窗口坐标和大小
+        ; 2. 获取当前状态
         WinGetPos(&winX, &winY, &winW, &winH, hwnd)
-        
-        ; 获取工作区
         MonitorGetWorkArea(1, &left, &top, &right, &bottom)
         
         workW := right - left
@@ -560,19 +557,22 @@ AdjustWindow(hwnd) {
         maxW := workW - (margin * 2)
         maxH := workH - (margin * 2)
 
-        ; 尺寸缩放逻辑
-        newW := (winW > maxW) ? maxW : winW
-        newH := (winH > maxH) ? maxH : winH
+        ; 3. 计算目标尺寸和位置
+        targetW := (winW > maxW) ? maxW : winW
+        targetH := (winH > maxH) ? maxH : winH
+        
+        targetX := Max(winX, left + margin)
+        targetY := Max(winY, top + margin)
 
-        ; 位置约束逻辑
-        newX := Max(winX, left + margin)
-        newY := Max(winY, top + margin)
+        if (targetX + targetW > right - margin)
+            targetX := right - margin - targetW
+        if (targetY + targetH > bottom - margin)
+            targetY := bottom - margin - targetH
 
-        if (newX + newW > right - margin)
-            newX := right - margin - newW
-        if (newY + newH > bottom - margin)
-            newY := bottom - margin - newH
-
-        WinMove(newX, newY, newW, newH, hwnd)
+        ; 4. **核心优化：差异检查**
+        ; 只有当 坐标 或 尺寸 发生变化，或者是从最大化还原回来的，才执行移动
+        if (isMaximized || targetX != winX || targetY != winY || targetW != winW || targetH != winH) {
+            WinMove(targetX, targetY, targetW, targetH, hwnd)
+        }
     }
 }
