@@ -374,7 +374,42 @@ MoveWindowDesktop(offset)
 ; Win + Q 关闭窗口
 #q::
 {
+    ; 如果检测到是全屏，直接返回，不做任何事情（从而屏蔽了该按键）
+    if IsFullScreen("A") {
+        return
+    }
+    
+    ; 否则，执行正常的关闭指令
     Send "!{F4}"
+}
+
+; 全屏检测核心函数（高精度版）
+IsFullScreen(winTitle) {
+    try {
+        if !(hWnd := WinExist(winTitle))
+            return false
+        
+        ; 检查样式：有标题栏的通常不是全屏
+        style := WinGetStyle(hWnd)
+        if (style & 0x00C00000) 
+            return false
+
+        WinGetPos(&winX, &winY, &winW, &winH, hWnd)
+        
+        ; 获取当前窗口所在显示器的物理区域
+        monitorIndex := DllCall("MonitorFromWindow", "Ptr", hWnd, "UInt", 0x2)
+        NumPut("UInt", 40, (info := Buffer(40)))
+        if DllCall("GetMonitorInfo", "Ptr", monitorIndex, "Ptr", info) {
+            monLeft   := NumGet(info, 4, "Int")
+            monTop    := NumGet(info, 8, "Int")
+            monRight  := NumGet(info, 12, "Int")
+            monBottom := NumGet(info, 16, "Int")
+            
+            ; 判断窗口是否完全覆盖了显示器
+            return (winX <= monLeft && winY <= monTop && winX + winW >= monRight && winY + winH >= monBottom)
+        }
+    }
+    return false
 }
 
 
@@ -503,42 +538,41 @@ ShellMessage(wParam, lParam, *) {
 
 AdjustWindow(hwnd) {
     try {
-        ; 排除掉一些不需要调整的窗口（如任务栏、桌面等）
+        ; 排除没有标题栏的窗口
         style := WinGetStyle(hwnd)
-        if !(style & 0x00C00000) ; 必须拥有标题栏 (WS_CAPTION)
+        if !(style & 0x00C00000)
             return
 
-        ; 1. 获取窗口当前的坐标和大小
+        ; --- 新增：检查并处理最大化状态 ---
+        ; WinGetMinMax 返回 1 表示最大化，-1 表示最小化，0 表示普通状态
+        if (WinGetMinMax(hwnd) = 1) {
+            WinRestore(hwnd) 
+        }
+
+        ; 获取当前窗口坐标和大小
         WinGetPos(&winX, &winY, &winW, &winH, hwnd)
         
-        ; 2. 获取当前显示器的工作区（自动避开任务栏）
-        ; 默认获取主显示器 (1)，如果多显示器可改用 MonitorFromWindow 逻辑
+        ; 获取工作区
         MonitorGetWorkArea(1, &left, &top, &right, &bottom)
         
         workW := right - left
         workH := bottom - top
-
-        ; 3. 计算允许的最大宽度和高度（扣除双倍边距）
         maxW := workW - (margin * 2)
         maxH := workH - (margin * 2)
 
-        ; 4. 判定并缩小尺寸（如果超出边距范围）
+        ; 尺寸缩放逻辑
         newW := (winW > maxW) ? maxW : winW
         newH := (winH > maxH) ? maxH : winH
 
-        ; 5. 计算目标位置（尽量保持原位置，但确保不超出边距边界）
-        ; 确保起始点不小于 (工作区左侧 + margin)
+        ; 位置约束逻辑
         newX := Max(winX, left + margin)
-        ; 确保起始点不小于 (工作区顶部 + margin)
         newY := Max(winY, top + margin)
 
-        ; 再次检查右侧和底部边界，防止窗口因位置偏移再次超出
         if (newX + newW > right - margin)
             newX := right - margin - newW
         if (newY + newH > bottom - margin)
             newY := bottom - margin - newH
 
-        ; 6. 执行移动与缩放
         WinMove(newX, newY, newW, newH, hwnd)
     }
 }
