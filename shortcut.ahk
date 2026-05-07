@@ -485,3 +485,60 @@ GoToDesktopNumber(num) {
 
 ; Win + F11 退出脚本
 #F12::ExitApp
+
+
+; 新窗口始终在边距内
+; 注册 Shell 钩子监听窗口创建
+DllCall("RegisterShellHookWindow", "Ptr", A_ScriptHwnd)
+OnMessage(DllCall("RegisterWindowMessage", "Str", "SHELLHOOK"), ShellMessage)
+
+ShellMessage(wParam, lParam, *) {
+    ; HSHELL_WINDOWCREATED = 1
+    if (wParam = 1) {
+        ; 延迟一小会儿，等待窗口完全初始化以获取正确的原始尺寸
+        Sleep(100)
+        AdjustWindow(lParam)
+    }
+}
+
+AdjustWindow(hwnd) {
+    try {
+        ; 排除掉一些不需要调整的窗口（如任务栏、桌面等）
+        style := WinGetStyle(hwnd)
+        if !(style & 0x00C00000) ; 必须拥有标题栏 (WS_CAPTION)
+            return
+
+        ; 1. 获取窗口当前的坐标和大小
+        WinGetPos(&winX, &winY, &winW, &winH, hwnd)
+        
+        ; 2. 获取当前显示器的工作区（自动避开任务栏）
+        ; 默认获取主显示器 (1)，如果多显示器可改用 MonitorFromWindow 逻辑
+        MonitorGetWorkArea(1, &left, &top, &right, &bottom)
+        
+        workW := right - left
+        workH := bottom - top
+
+        ; 3. 计算允许的最大宽度和高度（扣除双倍边距）
+        maxW := workW - (margin * 2)
+        maxH := workH - (margin * 2)
+
+        ; 4. 判定并缩小尺寸（如果超出边距范围）
+        newW := (winW > maxW) ? maxW : winW
+        newH := (winH > maxH) ? maxH : winH
+
+        ; 5. 计算目标位置（尽量保持原位置，但确保不超出边距边界）
+        ; 确保起始点不小于 (工作区左侧 + margin)
+        newX := Max(winX, left + margin)
+        ; 确保起始点不小于 (工作区顶部 + margin)
+        newY := Max(winY, top + margin)
+
+        ; 再次检查右侧和底部边界，防止窗口因位置偏移再次超出
+        if (newX + newW > right - margin)
+            newX := right - margin - newW
+        if (newY + newH > bottom - margin)
+            newY := bottom - margin - newH
+
+        ; 6. 执行移动与缩放
+        WinMove(newX, newY, newW, newH, hwnd)
+    }
+}
