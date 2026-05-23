@@ -22,6 +22,27 @@ if !A_IsAdmin
 global margin := 16
 
 
+; [新增后台辅助函数] 获取窗口隐形边框在 左右、上、下 三个维度的真实差值
+; 这样可以保证你下方每一个独立功能的内部代码逻辑清晰完整=
+GetWindowBorders(hwnd, &offsetX, &offsetY, &offsetBottom) {
+    try {
+        FrameRect := Buffer(16)
+        DllCall("dwmapi\DwmGetWindowAttribute", "ptr", hwnd, "uint", 9, "ptr", FrameRect, "uint", 16)
+        fLeft   := NumGet(FrameRect, 0, "int")
+        fTop    := NumGet(FrameRect, 4, "int")
+        fBottom := NumGet(FrameRect, 12, "int")
+        
+        WinGetPos(&wX, &wY, &wW, &wH, "ahk_id " hwnd)
+        
+        offsetX      := fLeft - wX
+        offsetY      := fTop - wY
+        offsetBottom := (wY + wH) - fBottom
+    } catch {
+        offsetX := 0, offsetY := 0, offsetBottom := 0
+    }
+}
+
+
 ; Win + F 窗口最大化
 #f::
 {
@@ -32,11 +53,10 @@ global margin := 16
     if WinGetMinMax(hwnd) = -1
         WinRestore(hwnd)
 
+    ; 1. 获取当前显示器的工作区信息
     hMon := DllCall("MonitorFromWindow", "ptr", hwnd, "uint", 2, "ptr")
-
     mi := Buffer(40, 0)
     NumPut("uint", 40, mi, 0)
-
     DllCall("GetMonitorInfo", "ptr", hMon, "ptr", mi)
 
     left   := NumGet(mi, 20, "int")
@@ -44,11 +64,22 @@ global margin := 16
     right  := NumGet(mi, 28, "int")
     bottom := NumGet(mi, 32, "int")
 
+    ; 2. 基础的留边位置计算（假设无边框时的理想状态）
     x := left + margin
     y := top + margin
     w := (right - left) - margin * 2
     h := (bottom - top) - margin * 2
 
+    ; 3. 核心：分别计算当前窗口【左、上、底】三边的隐形边框补偿量
+    GetWindowBorders(hwnd, &offsetX, &offsetY, &offsetBottom)
+
+    ; 4. 将不对称的补偿量精准应用到坐标和宽高上
+    x := x - offsetX
+    y := y - offsetY
+    w := w + (offsetX * 2) 
+    h := h + offsetY + offsetBottom 
+
+    ; 5. 执行移动
     if WinGetMinMax(hwnd) = 1
         WinRestore(hwnd)
 
@@ -60,7 +91,16 @@ global margin := 16
 #c::
 {
     hwnd := WinGetID("A")
-    WinGetPos(&x, &y, &w, &h, hwnd)
+    
+    ; 获取 DWM 视觉大小来进行更精准的居中计算，防止传统 WinGetPos 算偏
+    try {
+        FrameRect := Buffer(16)
+        DllCall("dwmapi\DwmGetWindowAttribute", "ptr", hwnd, "uint", 9, "ptr", FrameRect, "uint", 16)
+        w := NumGet(FrameRect, 8, "int") - NumGet(FrameRect, 0, "int")
+        h := NumGet(FrameRect, 12, "int") - NumGet(FrameRect, 4, "int")
+    } catch {
+        WinGetPos(, , &w, &h, hwnd)
+    }
 
     hMon := DllCall("MonitorFromWindow", "ptr", hwnd, "uint", 2, "ptr")
 
@@ -80,6 +120,11 @@ global margin := 16
     newX := left + (workW - w) // 2
     newY := top + (workH - h) // 2
 
+    ; 智能补偿隐形边框
+    GetWindowBorders(hwnd, &offsetX, &offsetY, &offsetBottom)
+    newX := newX - offsetX
+    newY := newY - offsetY
+
     WinMove(newX, newY, , , hwnd)
 }
 
@@ -89,38 +134,67 @@ global margin := 16
 SnapLeft() {
     global margin
 
+    hwnd := WinExist("A")
+    if !hwnd
+        return
+
     MonitorGetWorkArea(, &l, &t, &r, &b)
 
+    ; 1. 理想状态下的四边边界（预留外部边距）
     l += margin
     t += margin
     r -= margin
     b -= margin
 
-    w := (r - l) // 2
+    ; 2. 核心：计算扣除中间 16px 边距后的单窗口宽度
+    ; 我们需要在总宽度里再扣掉一个 margin，然后平分
+    w := ((r - l) - margin) // 2
     h := b - t
 
     WinRestore("A")
     Sleep 30
-    WinMove(l, t, w, h, "A")
+
+    ; 智能补偿隐形边框
+    GetWindowBorders(hwnd, &offsetX, &offsetY, &offsetBottom)
+    realX := l - offsetX
+    realY := t - offsetY
+    realW := w + (offsetX * 2)
+    realH := h + offsetY + offsetBottom
+
+    WinMove(realX, realY, realW, realH, "A")
 }
 
 SnapRight() {
     global margin
 
+    hwnd := WinExist("A")
+    if !hwnd
+        return
+
     MonitorGetWorkArea(, &l, &t, &r, &b)
 
+    ; 1. 理想状态下的四边边界（预留外部边距）
     l += margin
     t += margin
     r -= margin
     b -= margin
 
-    w := (r - l) // 2
+    ; 2. 核心：计算单窗口宽度，并让右侧窗口的 X 轴加上（窗口宽 + 中间边距）
+    w := ((r - l) - margin) // 2
     h := b - t
-    x := l + w
+    x := l + w + margin  ; 右侧窗口的起点需要跨过左侧窗口和中间的 margin
 
     WinRestore("A")
     Sleep 30
-    WinMove(x, t, w, h, "A")
+
+    ; 智能补偿隐形边框
+    GetWindowBorders(hwnd, &offsetX, &offsetY, &offsetBottom)
+    realX := x - offsetX
+    realY := t - offsetY
+    realW := w + (offsetX * 2)
+    realH := h + offsetY + offsetBottom
+
+    WinMove(realX, realY, realW, realH, "A")
 }
 
 #Left::SnapLeft()
@@ -141,7 +215,16 @@ MoveActiveWindowY(direction)
     if !hwnd
         return
 
-    WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
+    ; 为了防止传统 WinGetPos 包含透明边框导致贴边不准，这里提取视觉高
+    try {
+        FrameRect := Buffer(16)
+        DllCall("dwmapi\DwmGetWindowAttribute", "ptr", hwnd, "uint", 9, "ptr", FrameRect, "uint", 16)
+        h := NumGet(FrameRect, 12, "int") - NumGet(FrameRect, 4, "int")
+    } catch {
+        WinGetPos(, , , &h, "ahk_id " hwnd)
+    }
+
+    WinGetPos(&x, &y, &w, , "ahk_id " hwnd)
 
     ; 获取工作区
     MonitorGetWorkArea(1, &left, &top, &right, &bottom)
@@ -156,7 +239,11 @@ MoveActiveWindowY(direction)
     else
         newY := maxY      ; 下移到底
 
-    WinMove(x, newY,,, "ahk_id " hwnd)
+    ; 智能补偿隐形边框
+    GetWindowBorders(hwnd, &offsetX, &offsetY, &offsetBottom)
+    realY := newY - offsetY
+
+    WinMove(x, realY,,, "ahk_id " hwnd)
 }
 
 
@@ -167,8 +254,13 @@ global sizeState := 0  ; 0=1/3, 1=1/2, 2=2/3
 {
     global sizeState, margin
 
+    hwnd := WinExist("A")
+    if !hwnd
+        return
+
     MonitorGetWorkArea(, &l, &t, &r, &b)
 
+    ; 1. 预留最外圈的 16px 边距
     l += margin
     t += margin
     r -= margin
@@ -177,31 +269,58 @@ global sizeState := 0  ; 0=1/3, 1=1/2, 2=2/3
     totalW := r - l
     totalH := b - t
 
-    WinGetPos(&wx, &wy, &ww, &wh, "A")
+    ; 获取当前真实的视觉左侧位置与大小
+    try {
+        FrameRect := Buffer(16)
+        DllCall("dwmapi\DwmGetWindowAttribute", "ptr", hwnd, "uint", 9, "ptr", FrameRect, "uint", 16)
+        wx := NumGet(FrameRect, 0, "int")
+        ww := NumGet(FrameRect, 8, "int") - NumGet(FrameRect, 0, "int")
+    } catch {
+        WinGetPos(&wx, , &ww, , "A")
+    }
 
     center := l + totalW // 2
     isLeft := (wx + ww / 2 < center)
 
-    if (sizeState = 0)
-        w := totalW // 3
-    else if (sizeState = 1)
-        w := totalW // 2
-    else
-        w := (totalW * 2) // 3
+    ; 2. 核心：扣除中间缝隙，精准计算理想的视觉宽度
+    if (sizeState = 0) {
+        ; 1/3 状态：三等分有 2 条缝，单格宽 = (总宽 - 2个缝) // 3
+        w := (totalW - margin * 2) // 3
+    }
+    else if (sizeState = 1) {
+        ; 1/2 状态：二等分有 1 条缝，单格宽 = (总宽 - 1个缝) // 2
+        w := (totalW - margin) // 2
+    }
+    else {
+        ; 2/3 状态：单格宽乘以 2，再加上跨过的那条缝隙宽度
+        oneThirdW := (totalW - margin * 2) // 3
+        w := (oneThirdW * 2) + margin
+    }
 
     h := totalH
     y := t
 
-    if isLeft
+    ; 3. 精准计算理想的视觉 X 坐标
+    if isLeft {
         x := l
-    else
+    }
+    else {
         x := l + totalW - w
+    }
 
     if (WinGetMinMax("A") = 1)
         WinRestore("A")
 
     Sleep 20
-    WinMove(x, y, w, h, "A")
+
+    ; 4. 智能补偿隐形边框
+    GetWindowBorders(hwnd, &offsetX, &offsetY, &offsetBottom)
+    realX := x - offsetX
+    realY := y - offsetY
+    realW := w + (offsetX * 2)
+    realH := h + offsetY + offsetBottom
+
+    WinMove(realX, realY, realW, realH, "A")
 
     sizeState := Mod(sizeState + 1, 3)
 }
@@ -236,7 +355,17 @@ ResizeActiveWindow(dir) {
     if (WinGetMinMax(hwnd) = 1)
         WinRestore(hwnd)
 
-    WinGetPos(&x, &y, &w, &h, hwnd)
+    ; 提取当前视觉尺寸进行无缝无差缩放
+    try {
+        FrameRect := Buffer(16)
+        DllCall("dwmapi\DwmGetWindowAttribute", "ptr", hwnd, "uint", 9, "ptr", FrameRect, "uint", 16)
+        x := NumGet(FrameRect, 0, "int")
+        y := NumGet(FrameRect, 4, "int")
+        w := NumGet(FrameRect, 8, "int") - NumGet(FrameRect, 0, "int")
+        h := NumGet(FrameRect, 12, "int") - NumGet(FrameRect, 4, "int")
+    } catch {
+        WinGetPos(&x, &y, &w, &h, hwnd)
+    }
 
     hMon := DllCall("MonitorFromWindow", "ptr", hwnd, "uint", 2, "ptr")
 
@@ -304,11 +433,18 @@ ResizeActiveWindow(dir) {
     if (newY + newH > bottom)
         newY := bottom - newH
 
-    WinMove(newX, newY, newW, newH, hwnd)
+    ; 智能补回隐形边框
+    GetWindowBorders(hwnd, &offsetX, &offsetY, &offsetBottom)
+    realX := newX - offsetX
+    realY := newY - offsetY
+    realW := newW + (offsetX * 2)
+    realH := newH + offsetY + offsetBottom
+
+    WinMove(realX, realY, realW, realH, hwnd)
 }
 
 
-; Win + [ ] 使窗口移动到左侧虚拟桌面、右侧虚拟桌面，如果右侧虚拟桌面不存在则自动创建
+; Win + [ ] 使窗口移动 to 左侧虚拟桌面、右侧虚拟桌面，如果右侧虚拟桌面不存在则自动创建
 dllPath := A_ScriptDir "\VirtualDesktopAccessor.dll"
 global vdMoveReady := false
 
@@ -548,8 +684,18 @@ AdjustWindow(hwnd) {
             WinRestore(hwnd)
         }
 
-        ; 2. 获取当前状态
-        WinGetPos(&winX, &winY, &winW, &winH, hwnd)
+        ; 为了计算绝对对齐，这里获取真实视觉尺寸和位置
+        try {
+            FrameRect := Buffer(16)
+            DllCall("dwmapi\DwmGetWindowAttribute", "ptr", hwnd, "uint", 9, "ptr", FrameRect, "uint", 16)
+            winX := NumGet(FrameRect, 0, "int")
+            winY := NumGet(FrameRect, 4, "int")
+            winW := NumGet(FrameRect, 8, "int") - NumGet(FrameRect, 0, "int")
+            winH := NumGet(FrameRect, 12, "int") - NumGet(FrameRect, 4, "int")
+        } catch {
+            WinGetPos(&winX, &winY, &winW, &winH, hwnd)
+        }
+
         MonitorGetWorkArea(1, &left, &top, &right, &bottom)
         
         workW := right - left
@@ -572,7 +718,14 @@ AdjustWindow(hwnd) {
         ; 4. **核心优化：差异检查**
         ; 只有当 坐标 或 尺寸 发生变化，或者是从最大化还原回来的，才执行移动
         if (isMaximized || targetX != winX || targetY != winY || targetW != winW || targetH != winH) {
-            WinMove(targetX, targetY, targetW, targetH, hwnd)
+            ; 智能引入补偿
+            GetWindowBorders(hwnd, &offsetX, &offsetY, &offsetBottom)
+            realX := targetX - offsetX
+            realY := targetY - offsetY
+            realW := targetW + (offsetX * 2)
+            realH := targetH + offsetY + offsetBottom
+            
+            WinMove(realX, realY, realW, realH, hwnd)
         }
     }
 }
