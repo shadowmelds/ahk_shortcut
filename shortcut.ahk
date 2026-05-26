@@ -729,3 +729,7 @@ AdjustWindow(hwnd) {
         }
     }
 }
+
+
+; PrintScreen 直接截取整个屏幕，Win + Shift + S 可以区域截取
+PrintScreen::Send "#" . "{PrintScreen}"
