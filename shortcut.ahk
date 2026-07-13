@@ -572,19 +572,28 @@ $!Space::
 }
 
 
-; Win + T 打开终端
+; Win + T 打开终端（普通权限，非管理员）
 #t::
 {
     target := "wt.exe" 
+    ; 隐藏运行 cmd 中转启动，避免弹窗闪烁
     Run A_ComSpec ' /c "runas /trustlevel:0x20000 ' . target . '"', , "Hide"
+    
+    ; 等待窗口出现（最多等3秒，防止死锁），然后强行激活聚焦
+    if WinWait("ahk_exe wt.exe", , 3)
+        WinActivate("ahk_exe wt.exe")
 }
-
 
 ; Win + Shift + T 以管理员方式打开终端
 #+t::
 {
     Run('*RunAs wt.exe')
+    
+    ; 管理员权限窗口同样等待并强行激活
+    if WinWait("ahk_exe wt.exe", , 3)
+        WinActivate("ahk_exe wt.exe")
 }
+
 
 ; Win + 滚轮上 切换到左侧虚拟桌面
 ; Win + 滚轮下 切换到右侧虚拟桌面
